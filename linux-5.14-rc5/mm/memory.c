@@ -39,6 +39,7 @@
  * Aug/Sep 2004 Changed to four level page tables (Andi Kleen)
  */
 
+#include "linux/printk.h"
 #include <linux/kernel_stat.h>
 #include <linux/mm.h>
 #include <linux/sched/mm.h>
@@ -3799,17 +3800,25 @@ vm_fault_t do_swap_page_profiling(struct vm_fault *vmf, int *adc_pf_bits,
 
 		delayacct_clear_flag(current, DELAYACCT_PF_SWAPIN);
 		if (!locked) {
+			pr_warn("%s, try lock page failed, pfn = %lu\n",
+				__func__, page_to_pfn(page));
 			// TODO: fix it by passing the locked state as a param.
 			locked = hermit_mm_unlock_skippable() ?
 				 lock_page_or_retry_optim(
 					 page, vma->vm_mm, vmf->flags) :
 				 lock_page_or_retry(page, vma->vm_mm,
 						    vmf->flags);
+			if (locked) {
+				pr_warn("%s, try lock page success, pfn = %lu\n",
+					__func__, page_to_pfn(page));
+			}
 		}
 		if (!locked) {
 			ret |= VM_FAULT_RETRY;
 			adc_pf_breakdown_end(pf_breakdown, ADC_UPD_METADATA,
 					     pf_cycles_end());
+			pr_warn("%s, try lock page failed agian, pfn = %lu, retry\n",
+				__func__, page_to_pfn(page));
 			goto out_release;
 		}
 	}

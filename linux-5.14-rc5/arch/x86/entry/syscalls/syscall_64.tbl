@@ -374,6 +374,7 @@
 # Starts from 451, up to 500, to avoid any conflicts.
 451	common	reset_swap_stats	sys_reset_swap_stats
 452	common	get_swap_stats		sys_get_swap_stats
+453	common	get_page_flags		sys_get_page_flags
 
 #
 # Due to a historical design error, certain syscalls are numbered differently

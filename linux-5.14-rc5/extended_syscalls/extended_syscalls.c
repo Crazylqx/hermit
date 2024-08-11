@@ -33,3 +33,10 @@ SYSCALL_DEFINE3(get_swap_stats, int __user *, ondemand_swapin_num, int __user *,
 
 	return 0;
 }
+
+SYSCALL_DEFINE1(get_page_flags, u64, pfn)
+{
+	struct page *page;
+	page = pfn_to_page(pfn);
+	return page->flags;
+}

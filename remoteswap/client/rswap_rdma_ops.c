@@ -1,7 +1,82 @@
+#include "linux/sysfs.h"
 #include <linux/swap_stats.h>
 #include <linux/hermit.h>
 
 #include "rswap_rdma.h"
+
+static atomic_t unfinished_rdma_reqs[NUM_QP_TYPE];
+static struct kobject *rswap_kobject;
+
+static ssize_t unfinished_rdma_reqs_show(struct kobject *kobj,
+					 struct kobj_attribute *attr, char *buf)
+{
+	int i;
+	ssize_t n = 0;
+	int val;
+	for (i = 0; i < NUM_QP_TYPE; i++) {
+		val = atomic_read(&unfinished_rdma_reqs[i]);
+		n += sprintf(buf + n, "\t%d", val);
+	}
+	n += sprintf(buf + n, "\n");
+	return n;
+}
+
+static ssize_t poll_store(struct kobject *kobj, struct kobj_attribute *attr,
+			  const char *buf, size_t n)
+{
+	int i;
+	struct rdma_session_context *rdma_session = &rdma_session_global;
+	for (i = 0; i < num_queues; i++) {
+		struct rswap_rdma_queue *rdma_queue =
+			&(rdma_session->rdma_queues[i]);
+		int nr_pending = atomic_read(&rdma_queue->rdma_post_counter);
+		int nr_done = 0;
+		preempt_disable();
+		while (atomic_read(&rdma_queue->rdma_post_counter) > 0) {
+			// IB_POLL_BATCH is 16 by default
+			int nr_completed =
+				ib_process_cq_direct(rdma_queue->cq, 4);
+			nr_done += nr_completed;
+			if (nr_done >= nr_pending)
+				break;
+			if (nr_completed == 0)
+				break;
+		}
+		preempt_enable();
+		pr_warn("poll rdma queue %d: nr_pending = %d, nr_done = %d", i,
+			nr_pending, nr_done);
+	}
+	return n;
+}
+
+static struct kobj_attribute unfinished_rdma_reqs_attribute =
+	__ATTR_RO(unfinished_rdma_reqs);
+
+static struct kobj_attribute poll_attribute = __ATTR_WO(poll);
+
+static void rswap_sysfs_init(void)
+{
+	int err;
+
+	rswap_kobject = kobject_create_and_add("rswap", mm_kobj);
+	if (!rswap_kobject) {
+		pr_err("failed to create sysfs for rswap");
+		return;
+	}
+
+	err = sysfs_create_file(rswap_kobject,
+				&unfinished_rdma_reqs_attribute.attr);
+	if (err) {
+		pr_err("failed to create sysfs for unfinished_rdma_reqs");
+		return;
+	}
+
+	err = sysfs_create_file(rswap_kobject, &poll_attribute.attr);
+	if (err) {
+		pr_err("failed to create sysfs for unfinished_rdma_reqs");
+		return;
+	}
+}
 
 /**
  * Wait for the finish of ALL the outstanding rdma_request
@@ -72,6 +147,7 @@ void fs_rdma_callback(struct ib_cq *cq, struct ib_wc *wc)
 	bool unlock = true;
 	int cpu;
 	enum rdma_queue_type type;
+	int nr_unfinished;
 
 #if defined(RSWAP_KERNEL_SUPPORT) && RSWAP_KERNEL_SUPPORT >= 3
 	unlock = !hmt_ctl_flag(HMT_LAZY_POLL);
@@ -84,6 +160,11 @@ void fs_rdma_callback(struct ib_cq *cq, struct ib_wc *wc)
 		       wc->status);
 	}
 	get_rdma_queue_cpu_type(&rdma_session_global, rdma_queue, &cpu, &type);
+	nr_unfinished = atomic_dec_return(&unfinished_rdma_reqs[type]);
+	if (nr_unfinished < 0) {
+		pr_err("%s, nr_unfinished=%d, type=%d", __func__, nr_unfinished,
+		       type);
+	}
 	if (type == QP_STORE) { // STORE requests
 		// set_page_writeback(rdma_req->page);
 		unlock_page(rdma_req->page);
@@ -134,6 +215,8 @@ int fs_enqueue_send_wr(struct rdma_session_context *rdma_session,
 		} else { // RDMA send queue is full, wait for next turn.
 			test = atomic_dec_return(
 				&rdma_queue->rdma_post_counter);
+			pr_err("%s, qid=%d, counter=%d\n", __func__,
+			       rdma_queue->q_index, test);
 			cpu_relax();
 
 			drain_rdma_queue(rdma_queue);
@@ -215,6 +298,8 @@ int rswap_rdma_send(int cpu, pgoff_t offset, struct page *page,
 	struct rswap_rdma_queue *rdma_queue;
 	struct fs_rdma_req *rdma_req;
 	struct remote_chunk *remote_chunk_ptr;
+
+	atomic_inc(&unfinished_rdma_reqs[type]);
 
 	page_addr = pgoff2addr(offset);
 	chunk_idx = page_addr >> CHUNK_SHIFT;
@@ -460,6 +545,8 @@ int rswap_client_init(char *_server_ip, int _server_port, int _mem_size)
 {
 	int ret = 0;
 	printk(KERN_INFO "%s, start \n", __func__);
+
+	rswap_sysfs_init();
 
 	// online cores decide the parallelism. e.g. number of QP, CP etc.
 	online_cores = num_online_cpus();
