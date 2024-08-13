@@ -113,6 +113,8 @@ void write_drain_rdma_queue(struct rswap_rdma_queue *rdma_queue)
 			break;
 		cpu_relax();
 	}
+	pr_warn("%s, qid=%d, nr_pending=%d, nr_done=%d", __func__,
+		rdma_queue->q_index, nr_pending, nr_done);
 }
 
 static inline int peek_rdma_queue(struct rswap_rdma_queue *rdma_queue)

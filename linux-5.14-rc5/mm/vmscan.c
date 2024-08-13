@@ -985,9 +985,14 @@ typedef enum {
  * @core: -1 for synchronous RDMA store, >=0 for asynchronous RDMA store.
  * For async RDMA store, we need to call frontswap_poll_store() manually later.
  */
-static pageout_t pageout_profiling(struct page *page,
-				   struct address_space *mapping, bool hermit,
-				   int core, uint64_t pf_breakdown[])
+/* 
+	*writeback should be 0 before calling,
+	and will be set to 1 if a write-back succeed
+*/
+static pageout_t __pageout_profiling(struct page *page,
+				     struct address_space *mapping, bool hermit,
+				     int core, uint64_t pf_breakdown[],
+				     int *writeback)
 {
 	pageout_t ret = PAGE_KEEP;
 	/*
@@ -1060,6 +1065,7 @@ static pageout_t pageout_profiling(struct page *page,
 			adc_profile_counter_inc(ADC_HERMIT_SWAPOUT);
 		if (res < 0)
 			handle_write_error(mapping, page, res);
+		*writeback = 1;
 		if (res == AOP_WRITEPAGE_ACTIVATE) {
 			ClearPageReclaim(page);
 			ret = PAGE_ACTIVATE;
@@ -1080,6 +1086,16 @@ static pageout_t pageout_profiling(struct page *page,
 profiling:
 	adc_pf_breakdown_end(pf_breakdown, ADC_WRITE_PAGE, pf_cycles_end());
 	return ret;
+}
+
+static inline pageout_t pageout_profiling(struct page *page,
+					  struct address_space *mapping,
+					  bool hermit, int core,
+					  uint64_t pf_breakdown[])
+{
+	int writeback = 0;
+	return __pageout_profiling(page, mapping, hermit, core, pf_breakdown,
+			    &writeback);
 }
 
 static inline pageout_t pageout(struct page *page, struct address_space *mapping)
@@ -1681,6 +1697,9 @@ batched_pageout(struct list_head *page_list, struct list_head *clean_pages,
 	bool batch_tlb = hmt_ctl_flag(HMT_BATCH_TLB);
 	bool batch_io = hmt_ctl_flag(HMT_BATCH_IO);
 	int core = batch_io ? smp_processor_id() : -1;
+	int nr_writebacks = 0;
+
+	pr_warn("%s called", __func__);
 
 	/*
 	 * Page is dirty. Flush the TLB if a writable entry
@@ -1722,6 +1741,9 @@ batched_pageout(struct list_head *page_list, struct list_head *clean_pages,
 			goto keep_locked;
 
 		if (PageDirty(page)) {
+			int writeback = 0;
+			pageout_t pageout_result;
+			int try_lock_page_result;
 			if (page_is_file_lru(page) &&
 			    (!current_is_kswapd() || !PageReclaim(page) ||
 			     !test_bit(PGDAT_DIRTY, &pgdat->flags))) {
@@ -1743,8 +1765,11 @@ batched_pageout(struct list_head *page_list, struct list_head *clean_pages,
 			if (!batch_tlb)
 				try_to_unmap_flush_dirty();
 
-			switch (pageout_profiling(page, mapping, false, core,
-						  pf_breakdown)) {
+			pageout_result =
+				__pageout_profiling(page, mapping, false, core,
+						    pf_breakdown, &writeback);
+			nr_writebacks += writeback;
+			switch (pageout_result) {
 			case PAGE_KEEP:
 				goto keep_locked;
 			case PAGE_ACTIVATE:
@@ -1761,7 +1786,16 @@ batched_pageout(struct list_head *page_list, struct list_head *clean_pages,
 				 * A synchronous write - probably a ramdisk.  Go
 				 * ahead and try to reclaim the page.
 				 */
-				if (!trylock_page(page)) {
+				try_lock_page_result = trylock_page(page);
+				if (writeback && try_lock_page_result) {
+					pr_err("%s, the page is writting back but not added to list",
+					       __func__);
+				}
+				if (!writeback && !try_lock_page_result) {
+					pr_err("%s, the page not write back but can not be locked",
+					       __func__);
+				}
+				if (!try_lock_page_result) {
 					VM_BUG_ON_PAGE(
 						PageLRU(page) ||
 							PageUnevictable(page),
@@ -1818,6 +1852,8 @@ keep:
 	}
 
 	adc_pf_breakdown_stt(pf_breakdown, ADC_POLL_STORE, pf_ts);
+	pr_warn("%s, writeback %d pages, reclaimed %d pages", __func__,
+		nr_writebacks, nr_reclaimed);
 	if (frontswap_poll_store(core)) { // polling failed
 		pr_err("%s:%d\n", __func__, __LINE__);
 		list_splice_tail(&under_write_pages, ret_pages);
@@ -1838,6 +1874,8 @@ keep:
 
 done:
 	adc_counter_add(nr_reclaimed, ADC_BATCH_RECLAIM);
+
+	pr_warn("%s finished, nr_reclaimed = %d", __func__, nr_reclaimed);
 
 	return nr_reclaimed;
 }
@@ -2434,6 +2472,8 @@ hermit_shrink_page_list(struct list_head *vpage_list,
 	uint64_t pf_ts;
 	set_adc_pf_bits(adc_pf_bits, ADC_PF_SWAPOUT_BIT);
 	set_adc_pf_bits(adc_pf_bits, ADC_PF_HERMIT_BIT);
+
+	pr_err("%s should never be called", __func__);
 
 	memset(stat, 0, sizeof(*stat));
 	// cond_resched();
