@@ -13,11 +13,21 @@ static ssize_t unfinished_rdma_reqs_show(struct kobject *kobj,
 	int i;
 	ssize_t n = 0;
 	int val;
+	struct rdma_session_context *rdma_session = &rdma_session_global;
 	for (i = 0; i < NUM_QP_TYPE; i++) {
 		val = atomic_read(&unfinished_rdma_reqs[i]);
 		n += sprintf(buf + n, "\t%d", val);
 	}
 	n += sprintf(buf + n, "\n");
+
+	for (i = 0; i < num_queues; i++) {
+		struct rswap_rdma_queue *rdma_queue =
+			&(rdma_session->rdma_queues[i]);
+		int nr_pending = atomic_read(&rdma_queue->rdma_post_counter);
+		if (nr_pending != 0) {
+			n += sprintf(buf + n, "queue[%d]: %d\n", i, nr_pending);
+		}
+	}
 	return n;
 }
 
@@ -43,8 +53,8 @@ static ssize_t poll_store(struct kobject *kobj, struct kobj_attribute *attr,
 				break;
 		}
 		preempt_enable();
-		pr_warn("poll rdma queue %d: nr_pending = %d, nr_done = %d", i,
-			nr_pending, nr_done);
+		pr_debug("poll rdma queue %d: nr_pending = %d, nr_done = %d", i,
+			 nr_pending, nr_done);
 	}
 	return n;
 }
@@ -113,8 +123,8 @@ void write_drain_rdma_queue(struct rswap_rdma_queue *rdma_queue)
 			break;
 		cpu_relax();
 	}
-	pr_warn("%s, qid=%d, nr_pending=%d, nr_done=%d", __func__,
-		rdma_queue->q_index, nr_pending, nr_done);
+	pr_debug("%s, qid=%d, nr_pending=%d, nr_done=%d", __func__,
+		 rdma_queue->q_index, nr_pending, nr_done);
 }
 
 static inline int peek_rdma_queue(struct rswap_rdma_queue *rdma_queue)

@@ -773,6 +773,7 @@ int rdma_session_connect(struct rdma_session_context *rdma_session)
 		if (unlikely(ret)) {
 			pr_err("%s, Create rdma queues failed. \n", __func__);
 		}
+		print_debug("%s: created rdma queue", __func__);
 
 		ret = rswap_connect_remote_memory_server(rdma_session, i);
 		if (unlikely(ret)) {
@@ -780,7 +781,6 @@ int rdma_session_connect(struct rdma_session_context *rdma_session)
 			       __func__);
 			goto err;
 		}
-
 		pr_info("%s, RDMA queue[%d] Connect to remote server successfully \n",
 			__func__, i);
 	}
