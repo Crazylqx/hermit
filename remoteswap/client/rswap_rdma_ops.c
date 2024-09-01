@@ -279,7 +279,7 @@ int rswap_frontswap_store_on_core(unsigned type, pgoff_t swap_entry_offset,
 				  struct page *page, int core)
 {
 	int ret = 0;
-	core %= NR_WRITE_QUEUE;
+	// core %= NR_WRITE_QUEUE;
 	ret = rswap_rdma_send(core, swap_entry_offset, page, QP_STORE);
 	if (unlikely(ret)) {
 		pr_err("%s, enqueuing rdma frontswap write failed.\n",
@@ -296,7 +296,7 @@ int rswap_frontswap_poll_store(int core)
 {
 	struct rswap_rdma_queue *rdma_queue;
 
-	core %= NR_WRITE_QUEUE;
+	// core %= NR_WRITE_QUEUE;
 
 	rdma_queue = get_rdma_queue(&rdma_session_global, core, QP_STORE);
 	write_drain_rdma_queue(rdma_queue);
@@ -367,7 +367,7 @@ int rswap_frontswap_peek_load(int cpu)
 int rswap_frontswap_peek_store(int cpu)
 {
 	struct rswap_rdma_queue *rdma_queue;
-	cpu %= NR_WRITE_QUEUE;
+	// cpu %= NR_WRITE_QUEUE;
 	rdma_queue = get_rdma_queue(&rdma_session_global, cpu, QP_STORE);
 	return peek_rdma_queue(rdma_queue);
 }

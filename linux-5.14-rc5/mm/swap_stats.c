@@ -10,10 +10,10 @@ struct adc_time_stat adc_time_stats[NUM_ADC_TIME_STAT_TYPE];
 EXPORT_SYMBOL(adc_time_stats);
 
 static const char *adc_counter_names[NUM_ADC_COUNTER_TYPE] = {
-	"Demand         ", "Prefetch       ", "HitOnCache     ",
-	"TotalSwapOut   ", "TotalReclaim   ", "BatchReclaim   ",
-	"HermitSwapOut  ", "HermitIsoVpages", "HermitIsoVaddrs",
-	"HermitReclaim  ", "Optimisic Faild"
+	"Demand         ", "Prefetch       ", "PrefetchPresent",
+	"HitOnCache     ", "TotalSwapOut   ", "TotalReclaim   ",
+	"BatchReclaim   ", "HermitSwapOut  ", "HermitIsoVpages",
+	"HermitIsoVaddrs", "HermitReclaim  ", "Optimisic Faild"
 };
 
 void report_adc_counters(void)
@@ -121,6 +121,12 @@ static const char *adc_pf_breakdown_names[NUM_ADC_PF_BREAKDOWN_TYPE] = {
 	"READ_CACHE_ASYNC  ",
 	"ALLOC_PAGE        ",
 	"POLL_LOAD         ",
+	"READ_CACHE_FOUND  ",
+	"PREPARE_NEW_PAGE  ",
+	"X0			  	",
+	"X1				",
+	"X2				",
+	"X3				"
 };
 
 static const char *adc_pf_type_names[NUM_ADC_PF_TYPE] = {

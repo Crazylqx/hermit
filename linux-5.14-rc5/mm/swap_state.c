@@ -583,6 +583,7 @@ __read_swap_cache_async_profiling(swp_entry_t entry, gfp_t gfp_mask,
 	struct page *page;
 	void *shadow = NULL;
 	uint64_t pf_ts = -pf_cycles_start();
+	uint64_t ts0, ts1, ts2, ts3, ts4;
 
 	*new_page_allocated = false;
 
@@ -599,8 +600,12 @@ __read_swap_cache_async_profiling(swp_entry_t entry, gfp_t gfp_mask,
 		page = find_get_page(swap_address_space(entry),
 				     swp_offset(entry));
 		put_swap_device(si);
-		if (page)
+		if (page) {
+			pf_ts += pf_cycles_end();
+			adc_pf_breakdown_end(pf_breakdown, ADC_READ_CACHE_FOUND,
+					     pf_ts);
 			return page;
+		}
 
 		/*
 		 * Just skip read ahead for unused swap slot.
@@ -648,13 +653,18 @@ __read_swap_cache_async_profiling(swp_entry_t entry, gfp_t gfp_mask,
 	/*
 	 * The swap entry is ours to swap in. Prepare the new page.
 	 */
+	ts0 = pf_cycles_start();
 	__SetPageLocked(page);
 	__SetPageSwapBacked(page);
+
+	ts1 = pf_cycles_end();
 
 	if (hermit_mem_cgroup_swapin_charge_page(page, vma->vm_mm, gfp_mask,
 						 adc_pf_bits, pf_breakdown)) {
 		goto unlock;
 	}
+
+	ts2 = pf_cycles_end();
 
 	/* May fail (-ENOMEM) if XArray node allocation failed. */
 	if (add_to_swap_cache(page, entry, gfp_mask & GFP_RECLAIM_MASK,
@@ -662,6 +672,8 @@ __read_swap_cache_async_profiling(swp_entry_t entry, gfp_t gfp_mask,
 		goto unlock;
 	}
 	// mem_cgroup_swapin_uncharge_swap(entry);
+
+	ts3 = pf_cycles_end();
 
 	if (shadow) {
 		unsigned long rft_dist =
@@ -673,6 +685,14 @@ __read_swap_cache_async_profiling(swp_entry_t entry, gfp_t gfp_mask,
 	/* Caller will initiate read into locked page */
 	lru_cache_add(page);
 	*new_page_allocated = true;
+
+	ts4 = pf_cycles_end();
+
+	adc_pf_breakdown_end(pf_breakdown, ADC_PREPARE_NEW_PAGE, ts4 - ts0);
+	adc_pf_breakdown_end(pf_breakdown, ADC_X0, ts1 - ts0);
+	adc_pf_breakdown_end(pf_breakdown, ADC_X1, ts2 - ts1);
+	adc_pf_breakdown_end(pf_breakdown, ADC_X2, ts3 - ts2);
+	adc_pf_breakdown_end(pf_breakdown, ADC_X3, ts4 - ts3);
 
 	return page;
 
@@ -1127,6 +1147,7 @@ int hermit_vma_prefetch(struct pref_request *pref_req, int cpu,
 	unsigned int i = 0;
 	bool page_allocated;
 	int nr_prefed = 0;
+	int nr_present = 0;
 
 	struct vm_area_struct *vma = pref_req->vma;
 	struct vma_swap_readahead *ra_info = &pref_req->ra_info;
@@ -1149,8 +1170,10 @@ int hermit_vma_prefetch(struct pref_request *pref_req, int cpu,
 		pentry = *pte;
 		if (pte_none(pentry))
 			continue;
-		if (pte_present(pentry))
+		if (pte_present(pentry)) {
+			nr_present++;
 			continue;
+		}
 		entry = pte_to_swp_entry(pentry);
 		if (unlikely(non_swap_entry(entry)))
 			continue;
@@ -1169,7 +1192,6 @@ int hermit_vma_prefetch(struct pref_request *pref_req, int cpu,
 			count_vm_event(SWAP_RA);
 			set_page_prefetch(page);
 			// [RMGrid] profiling
-			adc_profile_counter_inc(ADC_PREFETCH_SWAPIN);
 			nr_prefed++;
 		}
 		put_page(page);
@@ -1179,6 +1201,8 @@ int hermit_vma_prefetch(struct pref_request *pref_req, int cpu,
 	pref_req->stt = i;
 done:
 	adc_pf_breakdown_end(pf_breakdown, ADC_PREFETCH, pf_cycles_end());
+	adc_counter_add(nr_prefed, ADC_PREFETCH_SWAPIN);
+	adc_counter_add(nr_present, ADC_PREFETCH_PRESENT);
 	return nr_prefed; // return where prefetch stops
 }
 
