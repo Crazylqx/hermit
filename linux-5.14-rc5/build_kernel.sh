@@ -7,9 +7,9 @@ version="5.14.0"
 
 # Append a suffix
 #LocalVersion="Semeru"
-LocalVersion=""
+LocalVersion="-hermit-lqx"
 
-num_cores=`nproc --all`
+num_cores=48
 
 ### Operations
 

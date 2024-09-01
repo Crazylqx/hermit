@@ -2,8 +2,8 @@
 
 
 ### Macros ###
-mem_server_ip="10.0.0.2"
-mem_server_port="9400"
+mem_server_ip="172.16.1.76"
+mem_server_port="7476"
 
 if [ -z "${HOME}" ]; then
 	echo "set home_dir first."
@@ -12,9 +12,9 @@ else
 	home_dir=${HOME}
 fi
 
-swap_file="${home_dir}/swapfile"
+swap_file="/mnt/swapfile"
 # The swap file/partition size should be equal to the whole size of remote memory
-SWAP_PARTITION_SIZE_GB="48"
+SWAP_PARTITION_SIZE_GB="128"
 
 echo " !! Warning, check the parameters below : "
 echo " Assigned memory server IP ${mem_server_ip} Port ${mem_server_port}"
